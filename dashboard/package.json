@@ -1,0 +1,13 @@
+{
+  "name": "claude-server-dashboard",
+  "version": "1.0.0",
+  "description": "Dashboard for Claude Server — status, chat, blocker resolution",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}

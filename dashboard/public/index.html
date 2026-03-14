@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Claude Server</title>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-deep:    #0f0f0f;
+      --bg-panel:   #1a1a1a;
+      --bg-input:   #252525;
+      --bg-hover:   #303030;
+      --accent:     #c9a227;
+      --accent-lt:  #e8c84a;
+      --orange:     #e05a1c;
+      --red:        #c0392b;
+      --green:      #6aaa64;
+      --text:       #d4d4d4;
+      --text-muted: #666;
+      --border:     #333;
+    }
+
+    html, body { height: 100%; background: var(--bg-deep); color: var(--text); font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace; font-size: 14px; }
+
+    .app { display: flex; flex-direction: column; height: 100vh; }
+
+    /* ── Header ── */
+    header {
+      padding: 10px 20px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg-panel);
+      display: flex; align-items: center; gap: 10px;
+      flex-shrink: 0;
+    }
+    header h1 { font-size: 14px; font-weight: 600; color: var(--accent-lt); letter-spacing: 0.05em; flex: 1; }
+    .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
+    .status-dot.blocked { background: var(--red); animation: pulse 1.2s ease-in-out infinite; }
+    .status-dot.idle { background: var(--text-muted); }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+    .blocker-badge {
+      display: none;
+      background: var(--red);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 3px;
+      letter-spacing: 0.08em;
+    }
+    .blocker-badge.visible { display: block; }
+
+    /* ── Panes ── */
+    .panes { display: flex; flex: 1; overflow: hidden; }
+
+    /* ── Status panel ── */
+    .status-panel {
+      width: 30%;
+      border-right: 1px solid var(--border);
+      background: var(--bg-panel);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .panel-label {
+      padding: 7px 14px;
+      font-size: 10px;
+      color: var(--text-muted);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .status-body { padding: 14px; overflow-y: auto; flex: 1; }
+
+    .stat { margin-bottom: 14px; }
+    .stat-label { font-size: 10px; color: var(--text-muted); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 3px; }
+    .stat-value { color: var(--accent-lt); font-size: 13px; line-height: 1.4; word-break: break-word; }
+    .stat-value.muted { color: var(--text-muted); }
+
+    .blocker-section {
+      display: none;
+      margin: 12px 0 0;
+      border: 1px solid var(--red);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .blocker-section.visible { display: block; }
+    .blocker-section-head {
+      background: var(--red);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 5px 10px;
+      letter-spacing: 0.08em;
+    }
+    .blocker-section-body { padding: 10px; font-size: 12px; line-height: 1.5; color: var(--text); }
+    .blocker-section-body h1, .blocker-section-body h2, .blocker-section-body h3 { font-size: 12px; color: var(--accent-lt); margin: 6px 0 3px; }
+    .blocker-section-body p { margin: 3px 0; }
+    .blocker-section-body code { background: var(--bg-input); padding: 1px 4px; border-radius: 2px; font-size: 11px; }
+
+    .btn-blocker-chat {
+      display: none;
+      margin: 10px 14px 14px;
+      width: calc(100% - 28px);
+      padding: 8px;
+      background: var(--red);
+      border: none;
+      border-radius: 4px;
+      color: #fff;
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      text-align: center;
+      transition: opacity 0.15s;
+    }
+    .btn-blocker-chat:hover { opacity: 0.85; }
+    .btn-blocker-chat.visible { display: block; }
+
+    /* ── Chat panel ── */
+    .chat-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .chat-mode-label {
+      padding: 7px 14px;
+      font-size: 10px;
+      color: var(--text-muted);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 8px;
+      flex-shrink: 0;
+    }
+    .chat-mode-label span { color: var(--orange); }
+
+    .messages { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+
+    .msg { max-width: 88%; padding: 9px 13px; border-radius: 5px; line-height: 1.6; word-break: break-word; }
+    .msg.user { align-self: flex-end; background: var(--bg-input); border: 1px solid var(--border); color: var(--accent-lt); white-space: pre-wrap; }
+    .msg.assistant { align-self: flex-start; background: var(--bg-panel); border: 1px solid var(--border); color: var(--text); }
+    .msg.assistant p { margin: 4px 0; }
+    .msg.assistant code { background: var(--bg-input); padding: 1px 4px; border-radius: 3px; font-size: 12px; color: var(--accent-lt); }
+    .msg.assistant pre { background: var(--bg-input); padding: 9px; border-radius: 3px; overflow-x: auto; margin: 6px 0; }
+    .msg.assistant pre code { background: none; padding: 0; }
+    .msg.assistant strong { color: var(--accent-lt); }
+    .msg.assistant ul, .msg.assistant ol { padding-left: 16px; }
+    .msg.assistant li { margin: 2px 0; }
+    .msg.assistant h1,.msg.assistant h2,.msg.assistant h3 { color: var(--accent-lt); margin: 8px 0 4px; font-size: 14px; }
+    .msg.thinking { color: var(--text-muted); font-style: italic; }
+
+    .input-area { border-top: 1px solid var(--border); background: var(--bg-panel); flex-shrink: 0; }
+
+    .decision-row {
+      display: none;
+      padding: 8px 14px 0;
+      gap: 8px;
+      align-items: center;
+    }
+    .decision-row.visible { display: flex; }
+    .decision-label { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+    .btn-submit {
+      background: var(--red);
+      border: none;
+      border-radius: 4px;
+      color: #fff;
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 5px 12px;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .btn-submit:hover { opacity: 0.85; }
+    .btn-submit:disabled { opacity: 0.4; cursor: default; }
+
+    .inbox-row {
+      display: flex;
+      padding: 8px 14px 0;
+      gap: 8px;
+      align-items: center;
+    }
+    .btn-inbox {
+      background: var(--accent);
+      border: none;
+      border-radius: 4px;
+      color: var(--bg-deep);
+      font-family: inherit;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 5px 12px;
+      cursor: pointer;
+      transition: opacity 0.15s;
+      letter-spacing: 0.04em;
+    }
+    .btn-inbox:hover { opacity: 0.85; }
+    .btn-inbox:disabled { opacity: 0.4; cursor: default; }
+    .btn-inbox.sent { background: var(--green); color: #fff; }
+
+    .input-row { display: flex; gap: 8px; padding: 10px 14px; }
+
+    textarea {
+      flex: 1;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--accent-lt);
+      padding: 8px 11px;
+      font-family: inherit;
+      font-size: 14px;
+      resize: none;
+      height: 40px;
+      max-height: 140px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    textarea:focus { border-color: var(--orange); }
+    textarea::placeholder { color: var(--text-muted); }
+
+    button#send {
+      background: var(--orange);
+      border: none;
+      border-radius: 4px;
+      color: #fff;
+      padding: 0 14px;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: opacity 0.15s;
+    }
+    button#send:hover { opacity: 0.85; }
+    button#send:disabled { opacity: 0.4; cursor: default; }
+
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    @media (max-width: 640px) {
+      .panes { flex-direction: column; }
+      .status-panel { width: 100%; max-height: 200px; border-right: none; border-bottom: 1px solid var(--border); }
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="status-dot" id="status-dot"></div>
+    <h1 id="header-title">Claude Server</h1>
+    <div class="blocker-badge" id="blocker-badge">BLOCKER</div>
+  </header>
+
+  <div class="panes">
+    <div class="status-panel">
+      <div class="panel-label">Status</div>
+      <div class="status-body">
+        <div class="stat">
+          <div class="stat-label">Phase</div>
+          <div class="stat-value" id="stat-phase">&mdash;</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Task</div>
+          <div class="stat-value" id="stat-task">&mdash;</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Last Heartbeat</div>
+          <div class="stat-value muted" id="stat-hb">&mdash;</div>
+        </div>
+        <div class="stat">
+          <div class="stat-label">Last Brief</div>
+          <div class="stat-value muted" id="stat-brief">&mdash;</div>
+        </div>
+
+        <div class="blocker-section" id="blocker-section">
+          <div class="blocker-section-head">Active Blocker</div>
+          <div class="blocker-section-body" id="blocker-body"></div>
+        </div>
+      </div>
+      <button class="btn-blocker-chat" id="btn-blocker-chat">Resolve this blocker</button>
+    </div>
+
+    <div class="chat-panel">
+      <div class="chat-mode-label" id="chat-label">Briefing mode</div>
+      <div class="messages" id="messages"></div>
+      <div class="input-area">
+        <div class="inbox-row" id="inbox-row">
+          <button class="btn-inbox" id="btn-inbox">Send to Claude</button>
+        </div>
+        <div class="decision-row" id="decision-row">
+          <span class="decision-label">Ready to submit your decision?</span>
+          <button class="btn-submit" id="btn-submit">Record Decision</button>
+        </div>
+        <div class="input-row">
+          <textarea id="input" placeholder="Ask about recent work..." rows="1"></textarea>
+          <button id="send">Send</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(async () => {
+  const dot         = document.getElementById('status-dot');
+  const badge       = document.getElementById('blocker-badge');
+  const headerTitle = document.getElementById('header-title');
+  const statPhase   = document.getElementById('stat-phase');
+  const statTask    = document.getElementById('stat-task');
+  const statHb      = document.getElementById('stat-hb');
+  const statBrief   = document.getElementById('stat-brief');
+  const blockerSec  = document.getElementById('blocker-section');
+  const blockerBody = document.getElementById('blocker-body');
+  const btnBlocker  = document.getElementById('btn-blocker-chat');
+  const chatLabel   = document.getElementById('chat-label');
+  const messagesEl  = document.getElementById('messages');
+  const inputEl     = document.getElementById('input');
+  const sendBtn     = document.getElementById('send');
+  const decisionRow = document.getElementById('decision-row');
+  const submitBtn   = document.getElementById('btn-submit');
+  const inboxBtn    = document.getElementById('btn-inbox');
+
+  let history = [];
+  let streaming = false;
+  let mode = new URLSearchParams(location.search).get('mode') || 'brief';
+  let blockerContent = null;
+
+  async function refreshStatus() {
+    try {
+      const { heartbeat, activeTask, hasBlocker, lastBrief } = await fetch('/api/status').then(r => r.json());
+
+      if (heartbeat) {
+        statPhase.textContent = heartbeat.phase || '\u2014';
+        statTask.textContent  = heartbeat.task  || '\u2014';
+        const age = Math.round((Date.now() / 1000) - heartbeat.timestamp);
+        statHb.textContent    = `${heartbeat.timestamp_human} (${age}s ago)`;
+        dot.className = 'status-dot' + (hasBlocker ? ' blocked' : age > 300 ? ' idle' : '');
+      } else {
+        dot.className = 'status-dot idle';
+      }
+
+      statBrief.textContent = lastBrief || 'none yet';
+
+      if (hasBlocker) {
+        badge.classList.add('visible');
+        blockerSec.classList.add('visible');
+        btnBlocker.classList.add('visible');
+        if (!blockerContent) {
+          const { content } = await fetch('/api/blocker').then(r => r.json());
+          blockerContent = content;
+          blockerBody.innerHTML = marked.parse(content || '');
+        }
+      } else {
+        badge.classList.remove('visible');
+        blockerSec.classList.remove('visible');
+        btnBlocker.classList.remove('visible');
+        blockerContent = null;
+      }
+    } catch {}
+  }
+
+  function enterBlockerMode() {
+    mode = 'blocker';
+    history = [];
+    messagesEl.innerHTML = '';
+    chatLabel.innerHTML = 'Blocker resolution \u2014 <span>decision required</span>';
+    inputEl.placeholder = 'Discuss the situation...';
+    decisionRow.classList.add('visible');
+    headerTitle.textContent = 'Claude Server \u2014 BLOCKER';
+  }
+
+  btnBlocker.addEventListener('click', enterBlockerMode);
+  if (mode === 'blocker') enterBlockerMode();
+
+  submitBtn.addEventListener('click', async () => {
+    if (streaming) return;
+    if (!history.length) {
+      submitBtn.textContent = 'Have the conversation first';
+      setTimeout(() => { submitBtn.textContent = 'Record Decision'; }, 2000);
+      return;
+    }
+    const lastAssistant = [...history].reverse().find(m => m.role === 'assistant');
+    const decision = lastAssistant?.content || '(see conversation)';
+    const conversation = history.map(m => `${m.role === 'user' ? 'You' : 'Claude'}: ${m.content}`).join('\n\n');
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Saving...';
+    try {
+      await fetch('/api/blocker-response', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decision, conversation }),
+      });
+      submitBtn.textContent = 'Decision recorded';
+      appendMsg('assistant', '*Decision recorded. The autonomous Claude instance will pick this up within 2 minutes.*');
+    } catch {
+      submitBtn.textContent = 'Error \u2014 try again';
+      submitBtn.disabled = false;
+    }
+  });
+
+  inboxBtn.addEventListener('click', async () => {
+    const text = inputEl.value.trim();
+    if (!text) return;
+    inboxBtn.disabled = true;
+    inboxBtn.textContent = 'Sending...';
+    try {
+      await fetch('/api/inbox', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: text }),
+      });
+      inputEl.value = '';
+      inputEl.style.height = '40px';
+      inboxBtn.textContent = 'Sent';
+      inboxBtn.classList.add('sent');
+      appendMsg('user', text);
+      appendMsg('assistant', '*Dropped in inbox \u2014 Claude will pick this up within 2 minutes.*');
+      setTimeout(() => { inboxBtn.textContent = 'Send to Claude'; inboxBtn.classList.remove('sent'); inboxBtn.disabled = false; }, 3000);
+    } catch {
+      inboxBtn.textContent = 'Error \u2014 try again';
+      inboxBtn.disabled = false;
+    }
+  });
+
+  async function saveTranscript() {
+    if (history.length < 2) return;
+    try {
+      await fetch('/api/chat-log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: history }),
+      });
+    } catch {}
+  }
+
+  function appendMsg(role, text) {
+    const div = document.createElement('div');
+    div.className = `msg ${role}`;
+    div.innerHTML = role === 'assistant' ? marked.parse(text) : '';
+    if (role === 'user') div.textContent = text;
+    messagesEl.appendChild(div);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    return div;
+  }
+
+  async function send() {
+    const text = inputEl.value.trim();
+    if (!text || streaming) return;
+    inputEl.value = '';
+    inputEl.style.height = '40px';
+    history.push({ role: 'user', content: text });
+    appendMsg('user', text);
+
+    streaming = true;
+    sendBtn.disabled = true;
+
+    const placeholder = appendMsg('assistant', '');
+    placeholder.classList.add('thinking');
+    placeholder.textContent = '...';
+
+    let accumulated = '';
+    try {
+      const resp = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: history, mode }),
+      });
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      placeholder.classList.remove('thinking');
+      placeholder.textContent = '';
+
+      let buf = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const lines = buf.split('\n');
+        buf = lines.pop();
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const raw = line.slice(6);
+          if (raw === '[DONE]') break;
+          try {
+            const { text: chunk, error } = JSON.parse(raw);
+            if (error) { accumulated += `\n\n*Error: ${error}*`; break; }
+            accumulated += chunk;
+            placeholder.innerHTML = marked.parse(accumulated);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+          } catch {}
+        }
+      }
+      history.push({ role: 'assistant', content: accumulated });
+      saveTranscript();
+    } catch (err) {
+      placeholder.textContent = `Error: ${err.message}`;
+    }
+
+    streaming = false;
+    sendBtn.disabled = false;
+    inputEl.focus();
+  }
+
+  inputEl.addEventListener('input', () => {
+    inputEl.style.height = '40px';
+    inputEl.style.height = Math.min(inputEl.scrollHeight, 140) + 'px';
+  });
+  inputEl.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+  });
+  sendBtn.addEventListener('click', send);
+
+  await refreshStatus();
+  setInterval(refreshStatus, 30000);
+})();
+</script>
+</body>
+</html>

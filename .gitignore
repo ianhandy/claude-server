@@ -1,0 +1,5 @@
+node_modules/
+tasks/heartbeat.json
+tasks/chats/
+tasks/ACTIVE_TASK
+*.log
