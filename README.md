@@ -1,8 +1,8 @@
 # claude-server
 
-Run Claude Code autonomously on your Mac. Task queue, watchdog, phone notifications, web dashboard — all powered by launchd.
+**Run Claude Code autonomously on your Mac — with task queuing, crash recovery, phone notifications, and a live dashboard.**
 
-**claude-server** is a template for turning a Mac into an autonomous Claude Code workstation. Drop a task file in the queue, walk away. Claude picks it up, executes it headlessly, commits the work, and pings your phone when it's done or blocked.
+Drop a task file in the queue. Walk away. Claude picks it up, executes it headlessly, writes session logs, commits the work, and pings your phone when it's done or blocked.
 
 No cloud. No Docker. Just launchd + shell scripts + Claude Code.
 
@@ -11,44 +11,71 @@ No cloud. No Docker. Just launchd + shell scripts + Claude Code.
 ## What It Does
 
 ```
-You (phone)                          Mac Server
-    │                                     │
-    │  drop task file ──────────────►  tasks/queue/PENDING-*.md
-    │                                     │
-    │                                  watchdog (every 2 min)
-    │                                     │
-    │                                  executor.sh
-    │                                     │ runs: claude --print
-    │                                     │ writes: heartbeat, session log
-    │                                     │ commits + pushes
-    │                                     │
-    │  ◄──── Pushover notification ───  done (or blocked)
-    │                                     │
-    │  open dashboard ─────────────►  localhost:3000
-    │  (chat, status, briefs)             │
+You (phone/laptop)                       Mac Server
+    │                                         │
+    │  drop task file ────────────────►  tasks/queue/PENDING-*.md
+    │                                         │
+    │                                    watchdog (every 2 min)
+    │                                         │
+    │                                    executor.sh
+    │                                         │ runs: claude --print
+    │                                         │ writes: heartbeat, session log
+    │                                         │ commits + pushes
+    │                                         │
+    │  ◄──── Pushover notification ─────  done (or blocked)
+    │                                         │
+    │  open dashboard ───────────────►  localhost:3000
+    │  (status, chat, resolve blockers)       │
 ```
 
-### Core Components
+### Core Features
 
-| File | Purpose |
-|------|---------|
-| `watchdog.sh` | Runs every 2 min via launchd. Picks up pending tasks, detects crashes, handles blockers. |
-| `executor.sh` | Runs a single task headlessly via `claude --print`. Manages locks, heartbeats, retries. |
-| `heartbeat.sh` | Writes `tasks/heartbeat.json` + auto-syncs to git. Watchdog uses this to detect crashes. |
-| `brief.sh` | Generates a daily briefing and sends it via Pushover. Runs at 8am. |
-| `dashboard/` | Node.js web dashboard — status, chat (via OpenRouter free models), inbox for directives. |
-| `CLAUDE.md` | Standing orders for the autonomous Claude instance. Customize this. |
+- **Task queue** — Drop a `.md` file in `tasks/queue/`, watchdog picks it up within 2 minutes
+- **Crash recovery** — Stale heartbeat = auto-restart + phone notification. 3 retries before parking.
+- **Blocker system** — Claude parks a task and asks you a question via dashboard. Queue continues with other tasks.
+- **Daily briefs** — 8am summary of overnight work: commits, session logs, open questions
+- **Phone notifications** — Pushover for blockers, crashes, daily briefs, inbox replies
+- **Web dashboard** — Real-time status, chat (via OpenRouter free models), inbox for directives
+- **Session logs** — Structured reasoning logs with decisions, rationale, and keyword-indexed search
+- **Inbox/Outbox** — Send messages to Claude from the dashboard, get replies in ~2 min
 
-### Features
+---
 
-- **Task queue** — drop a `.md` file in `tasks/queue/`, watchdog executes it
-- **Crash recovery** — stale heartbeat = auto-restart + phone notification
-- **Blocker system** — Claude can park a task and ask you a question via the dashboard
-- **Daily briefs** — morning summary of what happened overnight
-- **Web dashboard** — real-time status, chat with a briefing assistant, send directives
-- **Inbox/Outbox** — send messages to Claude from the dashboard, get replies
-- **Session logs** — every task produces a structured reasoning log for audit
-- **Auto-retry** — failed tasks retry 3x before parking in `blocked/`
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  launchd (macOS)                                        │
+│  ┌──────────┐  ┌──────────┐  ┌───────────────────────┐  │
+│  │ watchdog │  │  brief   │  │     dashboard         │  │
+│  │ (2 min)  │  │ (8am)    │  │   (always-on:3000)    │  │
+│  └────┬─────┘  └──────────┘  └───────────────────────┘  │
+│       │                                                  │
+│       ▼                                                  │
+│  ┌──────────┐     ┌──────────────┐                      │
+│  │ executor │────▶│ claude --print│                      │
+│  └────┬─────┘     └──────┬───────┘                      │
+│       │                  │                               │
+│       ▼                  ▼                               │
+│  tasks/queue/       heartbeat.json                       │
+│  PENDING-*.md       session logs                         │
+│                     git commits                          │
+└─────────────────────────────────────────────────────────┘
+         │
+         ▼
+   ┌──────────┐
+   │ Pushover │  ← phone notifications
+   └──────────┘
+```
+
+**Flow:**
+1. You drop a `PENDING-*.md` task file in `tasks/queue/`
+2. Watchdog (launchd, every 2 min) finds it, calls `executor.sh`
+3. Executor builds a prompt from CLAUDE.md + task content, runs `claude --print`
+4. Claude writes heartbeats as it works (watchdog monitors freshness)
+5. On completion: task moves to `done/`, session log written, git commit
+6. On blocker: task parks in `blocked/`, you get a phone notification, queue continues
+7. On crash: watchdog detects stale heartbeat, clears lock, re-queues (up to 3 retries)
 
 ---
 
@@ -56,71 +83,58 @@ You (phone)                          Mac Server
 
 ### Prerequisites
 
-- macOS (uses launchd)
-- [Claude Code](https://claude.com/code) installed and authenticated (`claude -p "hello"` works)
+- macOS (uses launchd for process management)
+- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated (`claude -p "hello"` works)
 - Node.js 18+ (`brew install node`)
-- [Pushover](https://pushover.net/) account (for phone notifications) — optional but recommended
+- Python 3 (ships with macOS)
 
-### 1. Clone and configure
+### Install
 
 ```bash
 git clone https://github.com/ianhandy/claude-server.git ~/claude-server
 cd ~/claude-server
+./setup.sh
 ```
 
-Edit `CLAUDE.md` — this is the system prompt for your autonomous Claude. Customize the identity, workspace paths, and operating principles.
+The setup script will:
+1. Create the `tasks/` directory structure
+2. Install dashboard dependencies (`npm install`)
+3. Install and load three launchd agents (watchdog, brief, dashboard)
+4. Prompt you for optional Pushover and OpenRouter configuration
 
-### 2. Set up Pushover (optional)
+### Configure
 
-Create `~/.pushover_secrets`:
+**CLAUDE.md** — Edit this file. It's the standing instructions for your autonomous Claude instance. Replace `{{WORKSPACE}}` placeholders with your paths and customize the operating principles.
 
+**Pushover** (optional, for phone notifications):
 ```bash
-PUSHOVER_TOKEN=your_app_token
-PUSHOVER_USER=your_user_key
+cat > ~/.pushover_secrets << 'EOF'
+PUSHOVER_TOKEN="your-app-token"
+PUSHOVER_USER="your-user-key"
+EOF
 ```
+Get credentials at [pushover.net](https://pushover.net).
 
-### 3. Install dashboard dependencies
-
+**OpenRouter** (optional, for dashboard chat):
 ```bash
-cd dashboard && npm install && cd ..
+export OPENROUTER_API_KEY="your-key"  # free tier works fine
 ```
+Get a key at [openrouter.ai](https://openrouter.ai).
 
-For chat functionality, get a free [OpenRouter](https://openrouter.ai/) API key and add it to the watchdog plist (see step 4).
-
-### 4. Install launchd agents
-
-Edit the plist files in `plists/` — update paths to match your install location.
+### Queue Your First Task
 
 ```bash
-# Copy plists to LaunchAgents
-cp plists/*.plist ~/Library/LaunchAgents/
-
-# Load them
-launchctl load ~/Library/LaunchAgents/com.claude-server.watchdog.plist
-launchctl load ~/Library/LaunchAgents/com.claude-server.dashboard.plist
-launchctl load ~/Library/LaunchAgents/com.claude-server.brief.plist
-```
-
-### 5. Queue your first task
-
-```bash
-cat > tasks/queue/PENDING-202603150900-hello-world.md << 'EOF'
+cat > tasks/queue/PENDING-$(date +%Y%m%d%H%M)-hello-world.md << 'EOF'
 ---
-repo: uncategorized
+repo: my-project
 priority: normal
 ---
-
-Say hello. Write a file called `hello.txt` in the workspace root with today's date and a haiku about autonomous AI.
-
-Success criteria: hello.txt exists with content.
+Create a simple hello world script.
+Success criteria: running `node hello.js` prints "Hello from Claude Server!"
 EOF
 ```
 
-The watchdog will pick it up within 2 minutes.
-
-### 6. Open the dashboard
-
-Visit `http://localhost:3000` — you'll see the heartbeat, task status, and chat panel.
+The watchdog picks it up within 2 minutes. Check progress at `http://localhost:3000`.
 
 ---
 
@@ -128,78 +142,107 @@ Visit `http://localhost:3000` — you'll see the heartbeat, task status, and cha
 
 ```markdown
 ---
-repo: my-project        # which repo to work in (under ~/Programming/repos/)
-priority: normal         # normal or high
+repo: my-project          # which repo to work in (relative to ~/repos/)
+priority: normal           # normal or high
 ---
 
 Description of what to do.
-Success criteria.
+Success criteria — how to know it's done.
 ```
 
-Drop it in `tasks/queue/` with the naming convention: `PENDING-YYYYMMDDHHMM-slug.md`
+**Naming:** `PENDING-YYYYMMDDHHMM-slug.md`
+
+Tasks process in alphabetical order (earliest timestamp first). Claude can queue its own follow-up tasks by writing new `PENDING-*.md` files.
 
 ---
 
-## Architecture
+## Dashboard
 
-```
-claude-server/
-├── CLAUDE.md           — standing orders (system prompt for autonomous Claude)
-├── executor.sh         — runs one task via claude --print
-├── watchdog.sh         — picks up tasks, handles crashes (launchd, every 2 min)
-├── heartbeat.sh        — status beacon + git sync
-├── brief.sh            — daily summary generator + Pushover push
-├── dashboard/
-│   ├── server.js       — Express server (status API, chat via OpenRouter, inbox)
-│   └── public/
-│       └── index.html  — web UI
-├── plists/             — launchd agent templates
-└── tasks/
-    ├── heartbeat.json  — current status
-    ├── queue/          — PENDING-*.md tasks → done/ when complete
-    │   ├── done/
-    │   └── blocked/    — tasks that failed 3x or hit a blocker
-    ├── inbox/          — messages from you → Claude reads these
-    ├── outbox/         — Claude's replies
-    ├── chats/          — dashboard chat transcripts (auto-saved)
-    ├── briefs/         — archived daily briefs
-    └── repos/          — session logs per repo
-        └── {repo}/
-            ├── INDEX.md
-            └── sessions/
-```
+The dashboard runs at `http://localhost:3000` and shows:
+
+- **Status panel** — current phase, task, heartbeat age, last brief
+- **Blocker resolution** — discuss the situation with a chat assistant, then record your decision
+- **Inbox** — send messages to your running Claude instance (replies in ~2 min)
+- **Chat** — ask questions about recent work (powered by OpenRouter free models)
+
+Access from any device on your network via Tailscale or port forwarding.
 
 ---
 
 ## How It Compares
 
-| | claude-server | [clawport-ui](https://github.com/JohnRiceML/clawport-ui) | [ruflo](https://github.com/ruvnet/ruflo) | [claude-ws](https://github.com/Claude-Workspace/claude-ws) |
+| | claude-server | clawport-ui | ruflo | Agent HQ |
 |---|---|---|---|---|
-| **Runs where** | Your Mac | Cloud/Docker | Cloud | Local/Cloud |
-| **Execution** | Headless `claude --print` | IDE agent teams | Swarm orchestration | REST+SSE backend |
-| **Task queue** | File-based, launchd | No | API-driven | Kanban board |
-| **Phone notifications** | Pushover | No | No | No |
+| **Runs unattended** | Yes | No | Partial | No |
+| **Task queue** | File-based + launchd | No | API-driven | No |
 | **Crash recovery** | Heartbeat watchdog | No | No | No |
-| **Daily briefs** | Yes (8am) | No | No | No |
-| **Dependencies** | Claude Code + Node.js | Docker + cloud | Docker + cloud | Docker |
-| **Setup time** | 5 min | 15+ min | 30+ min | 15+ min |
+| **Phone notifications** | Pushover | No | No | No |
+| **Daily briefs** | 8am summary | No | No | No |
+| **Session logging** | Structured + indexed | No | Partial | No |
+| **Setup time** | ~5 min | ~5 min | ~30 min | ~10 min |
 | **Cost** | $0 (Claude membership) | API costs | API costs | API costs |
+
+**claude-server is for running Claude while you sleep.** Other tools are interactive wrappers — they help you use Claude at the keyboard. This one makes Claude productive while you're away from it.
+
+---
+
+## Directory Structure
+
+```
+claude-server/
+├── CLAUDE.md              # Claude's standing instructions (customize this)
+├── executor.sh            # Runs a single task via claude --print
+├── watchdog.sh            # launchd agent — monitors queue + heartbeat
+├── heartbeat.sh           # Called by Claude to signal liveness
+├── brief.sh               # Generates and sends daily briefing
+├── setup.sh               # One-time installer
+├── dashboard/
+│   ├── server.js          # Express server (status API, chat, inbox)
+│   ├── public/index.html  # Single-page dashboard UI
+│   └── package.json
+├── plists/                # launchd agent templates
+│   ├── com.claude-server.watchdog.plist
+│   ├── com.claude-server.brief.plist
+│   └── com.claude-server.dashboard.plist
+└── tasks/                 # Created by setup.sh
+    ├── queue/             # Drop PENDING-*.md files here
+    │   ├── done/          # Completed tasks
+    │   └── blocked/       # Failed/blocked tasks
+    ├── inbox/             # Messages to Claude
+    ├── outbox/            # Replies from Claude
+    └── repos/             # Per-repo session logs + keyword indexes
+```
+
+---
+
+## Customization
+
+**Repos directory** — Set `REPOS_DIR` to change where the executor looks for repos (default: `~/repos/`).
+
+**Watchdog interval** — Edit `StartInterval` in the watchdog plist (default: 120 seconds).
+
+**Brief schedule** — Edit `StartCalendarInterval` in the brief plist (default: 8:00am).
+
+**Session log format** — Edit the log structure in `CLAUDE.md`. Claude follows whatever format you specify.
 
 ---
 
 ## FAQ
 
-**Q: Does this need an Anthropic API key?**
-A: No. It uses `claude --print` which runs through your Claude Code membership. The dashboard chat uses OpenRouter free models (also $0).
+**Does this need an Anthropic API key?**
+No. It uses `claude --print` which runs through your Claude Code CLI authentication. The dashboard chat uses OpenRouter free models (also $0).
 
-**Q: Can I run this on Linux?**
-A: The core scripts work anywhere, but the scheduling uses launchd (macOS). Replace with cron or systemd on Linux.
+**Can I run this on Linux?**
+The scripts work anywhere with zsh and python3. Replace launchd with cron or systemd for scheduling.
 
-**Q: What if Claude gets stuck?**
-A: The watchdog detects stale heartbeats (5 min silence = crash). It clears the lock, re-queues the task, and pings your phone.
+**What if Claude gets stuck in a loop?**
+The watchdog detects stale heartbeats (5 min silence = crash). It clears the lock, re-queues the task, and notifies you. After 3 failed attempts, the task is parked in `blocked/`.
 
-**Q: Can Claude queue its own follow-up tasks?**
-A: Yes. A running task can write a new `PENDING-*.md` file to the queue. The watchdog picks it up after the current task finishes.
+**Can Claude queue its own follow-up tasks?**
+Yes. A running task can write new `PENDING-*.md` files to the queue. The watchdog picks them up after the current task finishes.
+
+**Is my code safe?**
+Claude runs with `--dangerously-skip-permissions` (required for headless execution). This means it can read/write/execute anything on your Mac. Run this on a dedicated machine or user account if that concerns you.
 
 ---
 
