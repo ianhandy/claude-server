@@ -21,6 +21,13 @@ LOCK="$TASKS/ACTIVE_TASK"
 
 mkdir -p "$LOG_DIR"
 
+# ── Verify repo exists ───────────────────────────────────────────────────────
+if [ "$REPO" != "uncategorized" ] && [ ! -d "$REPO_PATH" ]; then
+    echo "[executor] ERROR: Repo path not found: $REPO_PATH" >> "$TASKS/watchdog.log"
+    echo "Repo directory $REPO_PATH does not exist. Check the 'repo:' field in the task or set REPOS_DIR." > "$LOG_FILE"
+    exit 1
+fi
+
 # ── Set lock ─────────────────────────────────────────────────────────────────
 echo "$TASK_SLUG" > "$LOCK"
 
@@ -62,9 +69,11 @@ Begin now."
 # ── Run Claude headlessly ────────────────────────────────────────────────────
 echo "[executor] Starting task: $TASK_SLUG at $(date '+%H:%M:%S')" >> "$TASKS/watchdog.log"
 
+ADD_DIRS="--add-dir $WORKSPACE"
+[ -d "$REPO_PATH" ] && ADD_DIRS="$ADD_DIRS --add-dir $REPO_PATH"
+
 claude --dangerously-skip-permissions \
-    --add-dir "$WORKSPACE" \
-    --add-dir "$REPO_PATH" \
+    ${=ADD_DIRS} \
     -p "$PROMPT" >> "$LOG_FILE" 2>&1
 
 EXIT_CODE=$?
