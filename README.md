@@ -165,6 +165,8 @@ The dashboard runs at `http://localhost:3000` and shows:
 - **Inbox** — send messages to your running Claude instance (replies in ~2 min)
 - **Chat** — ask questions about recent work (powered by OpenRouter free models)
 
+![Dashboard](screenshots/dashboard.png)
+
 Access from any device on your network via Tailscale or port forwarding.
 
 ---
