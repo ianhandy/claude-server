@@ -216,7 +216,7 @@
       color: var(--accent-lt);
       padding: 8px 11px;
       font-family: inherit;
-      font-size: 14px;
+      font-size: 16px;
       resize: none;
       height: 40px;
       max-height: 140px;
@@ -331,6 +331,13 @@
 
   let history = [];
   let streaming = false;
+
+  function isNearBottom(el, threshold = 80) {
+    return el.scrollHeight - el.scrollTop - el.clientHeight <= threshold;
+  }
+  function scrollIfNearBottom(el) {
+    if (isNearBottom(el)) el.scrollTop = el.scrollHeight;
+  }
   let mode = new URLSearchParams(location.search).get('mode') || 'brief';
   let blockerContent = null;
 
@@ -448,8 +455,9 @@
     div.className = `msg ${role}`;
     div.innerHTML = role === 'assistant' ? marked.parse(text) : '';
     if (role === 'user') div.textContent = text;
+    const wasNear = isNearBottom(messagesEl);
     messagesEl.appendChild(div);
-    messagesEl.scrollTop = messagesEl.scrollHeight;
+    if (wasNear) messagesEl.scrollTop = messagesEl.scrollHeight;
     return div;
   }
 
@@ -497,7 +505,7 @@
             if (error) { accumulated += `\n\n*Error: ${error}*`; break; }
             accumulated += chunk;
             placeholder.innerHTML = marked.parse(accumulated);
-            messagesEl.scrollTop = messagesEl.scrollHeight;
+            scrollIfNearBottom(messagesEl);
           } catch {}
         }
       }
