@@ -61,7 +61,7 @@ $TASK_CONTENT
   Use the standard log format from CLAUDE.md
 - Add your keywords to: $TASKS/repos/$REPO/INDEX.md
 - When done: move $TASK_FILE to $TASKS/queue/done/DONE-${TASK_SLUG}.md
-- If blocked: write $TASKS/BLOCKER.md with reason, then send Pushover
+- If blocked: write $TASKS/BLOCKER.md with reason, then send Telegram notification
 - Do NOT ask questions. Make a decision, log your reasoning, proceed.
 
 Begin now."
@@ -91,15 +91,31 @@ if [ -f "$TASKS/BLOCKER.md" ] && [ ! -f "$TASKS/BLOCKER_RESPONSE.md" ]; then
     # Write a sidecar linking the blocker to the parked task
     echo "PARKED_TASK=$PARKED" >> "$TASKS/BLOCKER.md"
 
-    # Notify via Pushover
-    source ~/.pushover_secrets 2>/dev/null
-    [ -n "$PUSHOVER_TOKEN" ] && curl -s \
-        --form-string "token=$PUSHOVER_TOKEN" \
-        --form-string "user=$PUSHOVER_USER" \
-        --form-string "title=Blocker: $BLOCKER_TITLE" \
-        --form-string "message=Task parked. Other work continues." \
-        --form-string "priority=1" \
-        https://api.pushover.net/1/messages.json > /dev/null 2>&1
+    # Notify via Telegram (blockers topic)
+    BLOCKER_BODY=$(head -20 "$TASKS/BLOCKER.md")
+    python3 - <<PYEOF
+import json, os, re, urllib.request
+try:
+    token_env = os.path.expanduser('~/.claude/channels/telegram/.env')
+    cfg_path  = os.path.expanduser('~/Programming/workspace/tasks/telegram-config.json')
+    token  = re.search(r'TELEGRAM_BOT_TOKEN=(\S+)', open(token_env).read()).group(1)
+    cfg    = json.load(open(cfg_path))
+    chat   = cfg['chatId']
+    topic  = cfg.get('blockerTopicId')
+    body   = open('$TASKS/BLOCKER.md').read(800)
+    text   = f"*Blocker: $BLOCKER_TITLE*\nTask parked. Other work continues.\n\n{body}\n\nReply here to approve or deny."
+    payload = {'chat_id': chat, 'text': text, 'parse_mode': 'Markdown'}
+    if topic:
+        payload['message_thread_id'] = topic
+    req = urllib.request.Request(
+        f'https://api.telegram.org/bot{token}/sendMessage',
+        data=json.dumps(payload).encode(),
+        headers={'Content-Type': 'application/json'},
+        method='POST')
+    urllib.request.urlopen(req, timeout=5)
+except:
+    pass
+PYEOF
 
     rm -f "$LOCK"
     "$WORKSPACE/heartbeat.sh" "blocked-parked" "$BLOCKER_TITLE (parked, queue continues)"
@@ -129,14 +145,27 @@ else
         rm -f "$RETRY_FILE"
         "$WORKSPACE/heartbeat.sh" "executor-parked" "$TASK_SLUG (failed $RETRIES times)"
 
-        source ~/.pushover_secrets 2>/dev/null
-        [ -n "$PUSHOVER_TOKEN" ] && curl -s \
-            --form-string "token=$PUSHOVER_TOKEN" \
-            --form-string "user=$PUSHOVER_USER" \
-            --form-string "title=Task Failed (3 retries)" \
-            --form-string "message=$TASK_SLUG failed 3 times. Parked in blocked/." \
-            --form-string "priority=0" \
-            https://api.pushover.net/1/messages.json > /dev/null 2>&1
+        python3 - <<PYEOF
+import json, os, re, urllib.request
+try:
+    token_env = os.path.expanduser('~/.claude/channels/telegram/.env')
+    cfg_path  = os.path.expanduser('~/Programming/workspace/tasks/telegram-config.json')
+    token  = re.search(r'TELEGRAM_BOT_TOKEN=(\S+)', open(token_env).read()).group(1)
+    cfg    = json.load(open(cfg_path))
+    chat   = cfg['chatId']
+    topic  = cfg.get('blockerTopicId')
+    payload = {'chat_id': chat, 'text': '*Task Failed (3 retries)*\n$TASK_SLUG failed 3 times. Parked in blocked/.', 'parse_mode': 'Markdown'}
+    if topic:
+        payload['message_thread_id'] = topic
+    req = urllib.request.Request(
+        f'https://api.telegram.org/bot{token}/sendMessage',
+        data=json.dumps(payload).encode(),
+        headers={'Content-Type': 'application/json'},
+        method='POST')
+    urllib.request.urlopen(req, timeout=5)
+except:
+    pass
+PYEOF
     else
         echo "[executor] Task failed (attempt $RETRIES/3): $TASK_SLUG (exit $EXIT_CODE)" >> "$TASKS/watchdog.log"
         "$WORKSPACE/heartbeat.sh" "executor-error" "$TASK_SLUG (attempt $RETRIES/3, exit $EXIT_CODE)"

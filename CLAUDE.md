@@ -177,26 +177,19 @@ Success criteria.
 3. If PENDING task in queue → run `executor.sh`
 4. If nothing → idle, exit quietly
 
-## Notifications (Pushover)
+## Notifications (Telegram)
 
-Credentials live in `~/.pushover_secrets` (never committed). Source it before any curl call.
+Credentials are managed by the Telegram plugin:
+- **Bot token:** `~/.claude/channels/telegram/.env` → `TELEGRAM_BOT_TOKEN=xxx`
+- **Chat config:** `~/Programming/workspace/tasks/telegram-config.json` → `{ "chatId": "xxx", "blockerTopicId": 123 }`
 
-```bash
-source ~/.pushover_secrets
-curl -s \
-  --form-string "token=$PUSHOVER_TOKEN" \
-  --form-string "user=$PUSHOVER_USER" \
-  --form-string "title=TITLE" \
-  --form-string "message=MSG" \
-  --form-string "priority=0" \
-  https://api.pushover.net/1/messages.json > /dev/null
-```
+Blockers go to the **Blockers topic** (a Telegram forum thread). Ian replies there to approve or deny. The engine auto-creates the topic on first use.
 
 **When to notify:** Blockers, daily briefs, crash recovery.
 **When NOT to notify:** Routine progress, successful commits, heartbeats.
 
 ## Daily Brief
 
-`brief.sh` runs at 8am via launchd, sends a Pushover notification and writes `tasks/BRIEF.md`.
+`brief.sh` runs at 8am via launchd, sends a Telegram message and writes `tasks/BRIEF.md`.
 
 The brief leads with whatever is most significant that day. Run manually anytime: `./brief.sh`

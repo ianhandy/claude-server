@@ -14,18 +14,25 @@ HEARTBEAT="$TASKS/heartbeat.json"
 DATE_LABEL=$(date '+%a %b %-d')
 NOW=$(date '+%Y-%m-%d %H:%M')
 
-source ~/.pushover_secrets 2>/dev/null
-
-push() {
-    local title="$1" msg="$2" priority="${3:-0}"
-    [ -z "$PUSHOVER_TOKEN" ] && { echo "[brief] Pushover not configured — skipping notification."; return; }
-    curl -s \
-        --form-string "token=$PUSHOVER_TOKEN" \
-        --form-string "user=$PUSHOVER_USER" \
-        --form-string "title=$title" \
-        --form-string "message=$msg" \
-        --form-string "priority=$priority" \
-        https://api.pushover.net/1/messages.json > /dev/null 2>&1
+tg_send() {
+    local title="$1" msg="$2"
+    python3 - <<PYEOF
+import json, os, re, urllib.request
+try:
+    token_env = os.path.expanduser('~/.claude/channels/telegram/.env')
+    cfg_path  = os.path.expanduser('~/Programming/workspace/tasks/telegram-config.json')
+    token  = re.search(r'TELEGRAM_BOT_TOKEN=(\S+)', open(token_env).read()).group(1)
+    cfg    = json.load(open(cfg_path))
+    payload = {'chat_id': cfg['chatId'], 'text': '*$title*\n$msg', 'parse_mode': 'Markdown'}
+    req = urllib.request.Request(
+        f'https://api.telegram.org/bot{token}/sendMessage',
+        data=json.dumps(payload).encode(),
+        headers={'Content-Type': 'application/json'},
+        method='POST')
+    urllib.request.urlopen(req, timeout=5)
+except Exception as e:
+    print(f'[brief] Telegram not configured — skipping notification: {e}')
+PYEOF
 }
 
 # ── Gather state ─────────────────────────────────────────────────────────────
@@ -128,7 +135,7 @@ build_push_msg() {
 PUSH_MSG=$(build_push_msg)
 PUSH_TITLE="Brief — $DATE_LABEL"
 
-push "$PUSH_TITLE" "$PUSH_MSG"
+tg_send "$PUSH_TITLE" "$PUSH_MSG"
 
 # Archive dated copy
 DATED_BRIEF="$TASKS/briefs/$(date '+%Y-%m-%d').md"

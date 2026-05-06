@@ -71,15 +71,24 @@ main() {
                 log "Re-queuing crashed task: $crashed_file"
             fi
 
-            # Notify via Pushover (if configured)
-            source ~/.pushover_secrets 2>/dev/null
-            [ -n "$PUSHOVER_TOKEN" ] && curl -s \
-                --form-string "token=$PUSHOVER_TOKEN" \
-                --form-string "user=$PUSHOVER_USER" \
-                --form-string "title=Task Crashed" \
-                --form-string "message=Task $crashed_task crashed (stale heartbeat). Re-queued." \
-                --form-string "priority=1" \
-                https://api.pushover.net/1/messages.json > /dev/null 2>&1
+            # Notify via Telegram (if configured)
+            python3 - <<PYEOF
+import json, os, re, urllib.request
+try:
+    token_env = os.path.expanduser('~/.claude/channels/telegram/.env')
+    cfg_path  = os.path.expanduser('~/Programming/workspace/tasks/telegram-config.json')
+    token  = re.search(r'TELEGRAM_BOT_TOKEN=(\S+)', open(token_env).read()).group(1)
+    cfg    = json.load(open(cfg_path))
+    payload = {'chat_id': cfg['chatId'], 'text': '*Task Crashed*\nTask $crashed_task crashed (stale heartbeat). Re-queued.', 'parse_mode': 'Markdown'}
+    req = urllib.request.Request(
+        f'https://api.telegram.org/bot{token}/sendMessage',
+        data=json.dumps(payload).encode(),
+        headers={'Content-Type': 'application/json'},
+        method='POST')
+    urllib.request.urlopen(req, timeout=5)
+except:
+    pass
+PYEOF
         fi
     fi
 
@@ -121,15 +130,25 @@ $MSG_CONTENT" 2>&1)
         mv "$next_msg" "$OUTBOX/${MSG_NAME}-original.md"
         log "Inbox replied: $MSG_NAME"
 
-        # Notify via Pushover (if configured)
-        source ~/.pushover_secrets 2>/dev/null
-        [ -n "$PUSHOVER_TOKEN" ] && curl -s \
-            --form-string "token=$PUSHOVER_TOKEN" \
-            --form-string "user=$PUSHOVER_USER" \
-            --form-string "title=Reply: $MSG_NAME" \
-            --form-string "message=$(head -c 200 "$OUTBOX/${MSG_NAME}-reply.md")" \
-            --form-string "priority=0" \
-            https://api.pushover.net/1/messages.json > /dev/null 2>&1
+        # Notify via Telegram (if configured)
+        python3 - <<PYEOF
+import json, os, re, urllib.request
+try:
+    token_env = os.path.expanduser('~/.claude/channels/telegram/.env')
+    cfg_path  = os.path.expanduser('~/Programming/workspace/tasks/telegram-config.json')
+    token  = re.search(r'TELEGRAM_BOT_TOKEN=(\S+)', open(token_env).read()).group(1)
+    cfg    = json.load(open(cfg_path))
+    preview = open('$OUTBOX/${MSG_NAME}-reply.md').read(300)
+    payload = {'chat_id': cfg['chatId'], 'text': f'*Reply: $MSG_NAME*\n{preview}', 'parse_mode': 'Markdown'}
+    req = urllib.request.Request(
+        f'https://api.telegram.org/bot{token}/sendMessage',
+        data=json.dumps(payload).encode(),
+        headers={'Content-Type': 'application/json'},
+        method='POST')
+    urllib.request.urlopen(req, timeout=5)
+except:
+    pass
+PYEOF
     fi
 
     # ── Task queue check ──────────────────────────────────────────────────────
